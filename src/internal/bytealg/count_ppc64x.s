@@ -1,4 +1,4 @@
-// Copyright 2018 The Go Authors. All rights reserved.
+Git`// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -41,6 +41,80 @@ TEXT countbytebody<>(SB), NOSPLIT|NOFRAME, $0-0
 
 	CMPU	R4, $32		// Check if it's a small string (<32 bytes)
 	BLT	tail		// Jump to the small string case
+
+	CMP	R4, $128, CR1	// Check if we can use 128-byte loop (full cache line)
+	BLT	CR1, loop32_setup
+
+	// Setup for 128-byte loop (full cache line on POWER8/9/10)
+	MOVD	$16, R11
+	MOVD	$32, R12
+	MOVD	$48, R14
+	MOVD	$64, R15
+	MOVD	$80, R16
+	MOVD	$96, R17
+	MOVD	$112, R19
+	SRD	$7, R4, R20	// R20 = len / 128
+	MOVD	R20, CTR
+	XXLXOR	V4, V4, V4
+	XXLXOR	V5, V5, V5
+	XXLXOR	V6, V6, V6
+	XXLXOR	V7, V7, V7
+
+	PCALIGN	$16
+loop128:
+	// Process full 128-byte cache line with 8 vector loads
+	LXVD2X	(R0)(R3), V0	// R3+0: Load bytes 0-15 (R0 is always 0)
+	LXVD2X	(R11)(R3), V2	// R3+16: Load bytes 16-31
+	LXVD2X	(R12)(R3), V8	// R3+32: Load bytes 32-47
+	LXVD2X	(R14)(R3), V9	// R3+48: Load bytes 48-63
+	VCMPEQUB V0, V1, V0
+	VCMPEQUB V2, V1, V2
+	VCMPEQUB V8, V1, V8
+	VCMPEQUB V9, V1, V9
+	VPOPCNTD V0, V0
+	VPOPCNTD V2, V2
+	VPOPCNTD V8, V8
+	VPOPCNTD V9, V9
+	VADDUDM	V0, V4, V4
+	VADDUDM	V2, V5, V5
+	VADDUDM	V8, V6, V6
+	VADDUDM	V9, V7, V7
+
+	LXVD2X	(R15)(R3), V0	// R3+64: Load bytes 64-79
+	LXVD2X	(R16)(R3), V2	// R3+80: Load bytes 80-95
+	LXVD2X	(R17)(R3), V8	// R3+96: Load bytes 96-111
+	LXVD2X	(R19)(R3), V9	// R3+112: Load bytes 112-127
+	VCMPEQUB V0, V1, V0
+	VCMPEQUB V2, V1, V2
+	VCMPEQUB V8, V1, V8
+	VCMPEQUB V9, V1, V9
+	VPOPCNTD V0, V0
+	VPOPCNTD V2, V2
+	VPOPCNTD V8, V8
+	VPOPCNTD V9, V9
+	VADDUDM	V0, V4, V4
+	VADDUDM	V2, V5, V5
+	VADDUDM	V8, V6, V6
+	VADDUDM	V9, V7, V7
+
+	ADD	$128, R3
+	BDNZ	loop128
+
+	// Combine all four accumulators
+	VADDUDM	V4, V5, V4
+	VADDUDM	V6, V7, V6
+	VADDUDM	V4, V6, V5
+	MFVSRD	V5, R18
+	VSLDOI	$8, V5, V5, V5
+	MFVSRD	V5, R21
+	ADD	R21, R18, R18
+	ANDCC	$127, R4, R4	// Remaining bytes after 128-byte chunks
+	BEQ	tail_0
+	CMP	R4, $32
+	BLT	tail
+	// Fall through to handle remaining 32-127 bytes
+
+loop32_setup:
 	SRD	$5, R4, R20
 	MOVD	R20, CTR
 	MOVD	$16, R21
@@ -61,9 +135,10 @@ cmploop:
 	BDNZ	cmploop
 
 	VADDUDM	V4, V5, V5
-	MFVSRD	V5, R18
-	VSLDOI	$8, V5, V5, V5
 	MFVSRD	V5, R21
+	VSLDOI	$8, V5, V5, V5
+	MFVSRD	V5, R22
+	ADD	R22, R21, R21
 	ADD	R21, R18, R18
 	ANDCC	$31, R4, R4
 	// Skip the tail processing if no bytes remaining.
