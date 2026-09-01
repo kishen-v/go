@@ -590,13 +590,22 @@ TEXT runtime·procyieldAsm(SB),NOSPLIT|NOFRAME,$0-4
 	MOVW	cycles+0(FP), R7
 	CMP	$0, R7
 	BEQ	done
-	// POWER does not have a pause/yield instruction equivalent.
-	// Instead, we can lower the program priority by setting the
-	// Program Priority Register prior to the wait loop and set it
-	// back to default afterwards. On Linux, the default priority is
-	// medium-low. For details, see page 837 of the ISA 3.0.
+	// Lower the Program Priority Register to yield SMT dispatch slots to
+	// sibling hardware threads while spinning. On Linux the default priority
+	// is medium-low. For details, see page 837 of the ISA 3.0.
 	OR	R1, R1, R1	// Set PPR priority to low
 again:
+#ifdef GOPPC64_power10
+	// WAIT WC=2,PL=0 encodes "pause_short" (ISA 3.1, X-form, 0x7C40003C).
+	// Suspends instruction fetch/execution until a short hardware-defined
+	// interval elapses, then resumes automatically. Yields SMT dispatch
+	// slots to the sibling thread holding the lock -- the ppc64 equivalent
+	// of x86 PAUSE / arm64 YIELD.
+	// WC=0: resumes only on exception -- indefinite stall, wrong.
+	// WC=1 (waitrsv): no-op when no reservation exists -- wrong.
+	// WC=2,PL=0: resumes after bounded short interval -- correct.
+	WORD	$0x7C40003C
+#endif
 	SUB	$1, R7
 	CMP	$0, R7
 	BNE	again
