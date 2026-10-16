@@ -7,7 +7,6 @@
 package flate
 
 import (
-	"internal/cpu"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -103,10 +102,6 @@ var (
 
 // nxInit initializes the VAS NX-GZIP hardware window if available on POWER10.
 func nxInit() {
-	if !cpu.PPC64.IsPOWER10 {
-		return
-	}
-
 	fd, err := syscall.Open(nxDevicePath, syscall.O_RDWR|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return
