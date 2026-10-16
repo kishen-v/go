@@ -14,7 +14,7 @@
 //   crb       +8(FP) - Pointer to 128-byte aligned CRB (*nxCRB)
 // Return:
 //   ret      +16(FP) - CR0 condition register result (uint32)
-TEXT ·nxCopyPaste(SB), NOSPLIT|NOFRAME, $0-24
+TEXT ·nxCopyPaste(SB), NOSPLIT|NOFRAME, $0-20
 	MOVD	pasteAddr+0(FP), R4
 	MOVD	crb+8(FP), R5
 	MOVD	$0, R3

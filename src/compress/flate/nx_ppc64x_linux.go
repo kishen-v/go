@@ -152,14 +152,14 @@ func nxTouchPages(buf []byte, write bool) {
 	pageSize := 64 * 1024
 	for i := 0; i < len(buf); i += pageSize {
 		if write {
-			buf[i] = buf[i]
+			buf[i] = buf[i] + 0
 		} else {
 			_ = buf[i]
 		}
 	}
 	last := len(buf) - 1
 	if write {
-		buf[last] = buf[last]
+		buf[last] = buf[last] + 0
 	} else {
 		_ = buf[last]
 	}
