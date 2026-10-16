@@ -218,6 +218,7 @@ func nxCompress(src, dst []byte) (int, error) {
 
 	// In Power ISA, CR0 is the upper 4 bits. CR0.EQ indicates paste acceptance.
 	if (ret>>28)&0x2 == 0 {
+		println("nx: paste rejected, CR0=", ret>>28, "raw CR=", ret)
 		return 0, errNXNotAccepted
 	}
 
