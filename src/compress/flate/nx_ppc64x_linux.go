@@ -174,7 +174,7 @@ func allocAligned(size, align int) []byte {
 }
 
 //go:noescape
-func nxCopyPaste(pasteAddr uintptr, crb *nxCRB) uint32
+func nxCopyPaste(pasteAddr uintptr, crb unsafe.Pointer) uint32
 
 // nxCompress executes Deflate compression on src into dst using Power10 NX hardware.
 func nxCompress(src, dst []byte) (int, error) {
@@ -185,55 +185,59 @@ func nxCompress(src, dst []byte) (int, error) {
 	nxMu.Lock()
 	defer nxMu.Unlock()
 
-	crbBuf := allocAligned(int(unsafe.Sizeof(nxCRB{})), nxAlignSize)
-	crb := (*nxCRB)(unsafe.Pointer(&crbBuf[0]))
-	*crb = nxCRB{}
+	cmdBuf := allocAligned(2048, 2048)
+	cmdPtr := uintptr(unsafe.Pointer(&cmdBuf[0]))
 
-	csbBuf := allocAligned(int(unsafe.Sizeof(nxCSB{})), 128)
-	csb := (*nxCSB)(unsafe.Pointer(&csbBuf[0]))
-	*csb = nxCSB{}
+	// GZIP_FC_COMPRESS_RESUME_FHT = 0x08
+	*(*uint32)(unsafe.Pointer(cmdPtr + 0)) = bits.ReverseBytes32(0x00000008)
 
-	csbPtr := uint64(uintptr(unsafe.Pointer(csb)))
+	// CSB is located at offset 240
+	csbAddr := uint64(cmdPtr + 240)
+	*(*uint64)(unsafe.Pointer(cmdPtr + 8)) = bits.ReverseBytes64(csbAddr)
 
-	// CCW for GZIP/Deflate: FC = GZIP_FC_COMPRESS_FHT (0x02), CT = 0x1F
-	crb.ccw = bits.ReverseBytes32(0x001F0002)
-	crb.csbAddr = bits.ReverseBytes64(csbPtr)
-
-	// Setup Source DDE
+	// Source DDE: length at offset 20, address at offset 24
 	srcPtr := uint64(uintptr(unsafe.Pointer(&src[0])))
-	crb.sourceDDE.length = bits.ReverseBytes32(uint32(len(src)))
-	crb.sourceDDE.address = bits.ReverseBytes64(srcPtr)
+	*(*uint32)(unsafe.Pointer(cmdPtr + 20)) = bits.ReverseBytes32(uint32(len(src)))
+	*(*uint64)(unsafe.Pointer(cmdPtr + 24)) = bits.ReverseBytes64(srcPtr)
 
-	// Setup Target DDE
+	// Target DDE: length at offset 36, address at offset 40
 	dstPtr := uint64(uintptr(unsafe.Pointer(&dst[0])))
-	crb.targetDDE.length = bits.ReverseBytes32(uint32(len(dst)))
-	crb.targetDDE.address = bits.ReverseBytes64(dstPtr)
+	*(*uint32)(unsafe.Pointer(cmdPtr + 36)) = bits.ReverseBytes32(uint32(len(dst)))
+	*(*uint64)(unsafe.Pointer(cmdPtr + 40)) = bits.ReverseBytes64(dstPtr)
 
-	// Touch memory pages to avoid DMA page faults
+	// Touch memory pages to ensure virtual memory is resident
 	nxTouchPages(src, false)
 	nxTouchPages(dst, true)
 
-	// Dispatch to hardware MMIO window
-	ret := nxCopyPaste(globalNX.pasteAddr, crb)
-
-	// In Power ISA, CR0 is the upper 4 bits. CR0.EQ (bit 2) indicates paste acceptance (values 2 or 3).
-	cr0 := (ret >> 28) & 0xF
-	if cr0 != 2 && cr0 != 3 {
+	// Retry paste loop up to 5000 attempts
+	var ret uint32
+	var ok bool
+	for r := 0; r < 5000; r++ {
+		ret = nxCopyPaste(globalNX.pasteAddr, unsafe.Pointer(cmdPtr))
+		cr0 := (ret >> 28) & 0xF
+		if cr0 == 2 || cr0 == 3 {
+			ok = true
+			break
+		}
+	}
+	if !ok {
 		return 0, errNXNotAccepted
 	}
 
-	// Poll CSB completion flag (bit 0 of flags byte indicates hardware completion)
-	for i := 0; csb.flags&0x80 == 0; i++ {
-		if i > 5000000 {
+	// Poll CSB completion flag at offset 240
+	csbFlags := (*uint8)(unsafe.Pointer(cmdPtr + 240))
+	for i := 0; *csbFlags&0x80 == 0; i++ {
+		if i > 10000000 {
 			return 0, errNXNotAccepted
 		}
 	}
 
-	if csb.cc != 0 {
+	csbCC := *(*uint8)(unsafe.Pointer(cmdPtr + 242))
+	if csbCC != 0 {
 		return 0, errNXNotAccepted
 	}
 
-	prod := bits.ReverseBytes32(csb.count)
+	prod := bits.ReverseBytes32(*(*uint32)(unsafe.Pointer(cmdPtr + 244)))
 	return int(prod), nil
 }
 
