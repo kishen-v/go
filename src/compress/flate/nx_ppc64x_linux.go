@@ -77,8 +77,7 @@ type nxCRB struct {
 	ccbValue uint64
 	ccbAddr  uint64
 
-	reserved [48]byte
-	csb      nxCSB
+	reserved [64]byte
 }
 
 // nxState tracks the initialized VAS paste window for the process.
@@ -191,7 +190,10 @@ func nxCompress(src, dst []byte) (int, error) {
 	crb := (*nxCRB)(unsafe.Pointer(&crbBuf[0]))
 	*crb = nxCRB{}
 
-	csb := &crb.csb
+	csbBuf := allocAligned(int(unsafe.Sizeof(nxCSB{})), 128)
+	csb := (*nxCSB)(unsafe.Pointer(&csbBuf[0]))
+	*csb = nxCSB{}
+
 	csbPtr := uint64(uintptr(unsafe.Pointer(csb)))
 
 	// CCW for GZIP/Deflate: FC = GZIP_FC_COMPRESS_FHT (0x02), CT = 0x1F
