@@ -238,6 +238,10 @@ func nxCompress(src, dst []byte) (int, error) {
 	}
 
 	prod := bits.ReverseBytes32(*(*uint32)(unsafe.Pointer(cmdPtr + 244)))
+	if prod > 0 {
+		// Set BFINAL bit (bit 0 of the first Deflate block) per RFC 1951
+		dst[0] |= 0x01
+	}
 	return int(prod), nil
 }
 
