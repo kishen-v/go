@@ -132,7 +132,7 @@ func nxInit() {
 
 	globalNX.available = true
 	globalNX.fd = fd
-	globalNX.pasteAddr = uintptr(unsafe.Pointer(&data[0]))
+	globalNX.pasteAddr = uintptr(unsafe.Pointer(&data[0])) + 0x400
 	globalNX.mmapLen = pageSize
 }
 
@@ -216,9 +216,9 @@ func nxCompress(src, dst []byte) (int, error) {
 	// Dispatch to hardware MMIO window
 	ret := nxCopyPaste(globalNX.pasteAddr, crb)
 
-	// In Power ISA, CR0 is the upper 4 bits. CR0.EQ indicates paste acceptance.
-	if (ret>>28)&0x2 == 0 {
-		println("nx: paste rejected, CR0=", ret>>28, "raw CR=", ret)
+	// In Power ISA, CR0 is the upper 4 bits. CR0.EQ (bit 2) indicates paste acceptance (values 2 or 3).
+	cr0 := (ret >> 28) & 0xF
+	if cr0 != 2 && cr0 != 3 {
 		return 0, errNXNotAccepted
 	}
 

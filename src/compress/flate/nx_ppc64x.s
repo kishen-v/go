@@ -19,11 +19,20 @@ TEXT ·nxCopyPaste(SB), NOSPLIT|NOFRAME, $0-20
 	MOVD	crb+8(FP), R5
 	MOVD	$0, R3
 
+	// Power ISA memory barrier before copy
+	SYNC
+
 	// Copy 128 bytes from CRB at (R3+R5) into CPU copy buffer
 	COPY	R3, R5
 
+	// Power ISA memory barrier before paste
+	SYNC
+
 	// Paste the buffer to MMIO address at (R3+R4)
 	PASTECC	R3, R4
+
+	// Power ISA memory barrier after paste
+	SYNC
 
 	// Read Condition Register to capture paste. status (CR0 EQ indicates success)
 	MOVW	CR, R6
