@@ -12,7 +12,6 @@ import (
 	"os"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
