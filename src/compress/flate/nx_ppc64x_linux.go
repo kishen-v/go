@@ -241,17 +241,31 @@ func nxCompress(src, dst []byte) (int, error) {
 	return int(prod), nil
 }
 
-// writeNX writes compressed data using the NX hardware offload path.
+const nxMaxChunkSize = 1024 * 1024 // 1 MB PowerVM maximum DMA processed buffer
+
+// writeNX writes compressed data using the NX hardware offload path in chunks up to 1 MB.
 func (w *Writer) writeNX(data []byte) (int, error) {
-	dst := make([]byte, len(data)+1024)
-	n, err := nxCompress(data, dst)
-	if err != nil {
-		// Fallback cleanly to software path on error
-		return w.d.write(data)
+	totalWritten := 0
+	for len(data) > 0 {
+		chunkSize := len(data)
+		if chunkSize > nxMaxChunkSize {
+			chunkSize = nxMaxChunkSize
+		}
+		chunk := data[:chunkSize]
+		data = data[chunkSize:]
+
+		dst := make([]byte, len(chunk)+2048)
+		n, err := nxCompress(chunk, dst)
+		if err != nil {
+			// Fallback cleanly to software path on error for remainder
+			remN, remErr := w.d.write(append(chunk, data...))
+			return totalWritten + remN, remErr
+		}
+		_, err = w.d.w.writer.Write(dst[:n])
+		if err != nil {
+			return totalWritten, err
+		}
+		totalWritten += len(chunk)
 	}
-	_, err = w.d.w.writer.Write(dst[:n])
-	if err != nil {
-		return 0, err
-	}
-	return len(data), nil
+	return totalWritten, nil
 }
