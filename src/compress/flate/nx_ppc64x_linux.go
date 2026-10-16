@@ -8,7 +8,7 @@ package flate
 
 import (
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"sync"
 	"syscall"
 	"time"
@@ -29,6 +29,8 @@ const (
 	// Alignment constants
 	nxAlignSize = 256
 )
+
+var errNXNotAccepted = errors.New("nx: paste rejected by hardware")
 
 // vasTxWinOpenAttr represents the Linux kernel struct vas_tx_win_open_attr (64 bytes).
 type vasTxWinOpenAttr struct {
@@ -169,6 +171,10 @@ func nxCopyPaste(pasteAddr uintptr, crb *nxCRB) uint32
 
 // nxCompress executes Deflate compression on src into dst using Power10 NX hardware.
 func nxCompress(src, dst []byte) (int, error) {
+	if !globalNX.available || globalNX.pasteAddr == 0 {
+		return 0, errNXNotAccepted
+	}
+
 	crbBuf := allocAligned(int(unsafe.Sizeof(nxCRB{})), nxAlignSize)
 	crb := (*nxCRB)(unsafe.Pointer(&crbBuf[0]))
 	*crb = nxCRB{}
@@ -210,16 +216,22 @@ func nxCompress(src, dst []byte) (int, error) {
 	// Dispatch to hardware MMIO window
 	ret := nxCopyPaste(globalNX.pasteAddr, crb)
 
-	// Poll CSB completion with timeout
-	deadline := time.Now().Add(200 * time.Millisecond)
+	// In Power ISA, CR0 is the upper 4 bits. CR0.EQ indicates paste acceptance.
+	if (ret>>28)&0x2 == 0 {
+		// Hardware queue rejected or busy: immediately return to trigger software fallback
+		return 0, errNXNotAccepted
+	}
+
+	// Poll CSB completion with short timeout
+	deadline := time.Now().Add(50 * time.Millisecond)
 	for csb.flags&0x80 == 0 {
 		if time.Now().After(deadline) {
-			return 0, fmt.Errorf("nx timeout, paste ret = 0x%x", ret)
+			return 0, errNXNotAccepted
 		}
 	}
 
 	if csb.cc != 0 {
-		return 0, fmt.Errorf("nx error cc = 0x%x", csb.cc)
+		return 0, errNXNotAccepted
 	}
 
 	prod := binary.BigEndian.Uint32([]byte{
