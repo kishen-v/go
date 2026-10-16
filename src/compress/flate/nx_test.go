@@ -12,4 +12,11 @@ func TestNXAvailable(t *testing.T) {
 	// Verify that querying NX status does not panic on any platform.
 	avail := isNXAvailable()
 	t.Logf("NX hardware acceleration available: %v", avail)
+
+	if avail {
+		src := []byte("Hello Power10 NX hardware acceleration! 1234567890 1234567890 1234567890 1234567890")
+		dst := make([]byte, len(src)+1024)
+		n, err := nxCompress(src, dst)
+		t.Logf("nxCompress result: n=%d, err=%v", n, err)
+	}
 }
