@@ -7,8 +7,8 @@
 package flate
 
 import (
-	"encoding/binary"
 	"errors"
+	"math/bits"
 	"os"
 	"sync"
 	"syscall"
@@ -196,31 +196,18 @@ func nxCompress(src, dst []byte) (int, error) {
 	csbPtr := uint64(uintptr(unsafe.Pointer(csb)))
 
 	// CCW for GZIP/Deflate: FC = GZIP_FC_COMPRESS_FHT (0x02), CT = 0x1F
-	crb.ccw = binary.BigEndian.Uint32([]byte{0x00, 0x1F, 0x00, 0x02})
-	crb.csbAddr = binary.BigEndian.Uint64([]byte{
-		byte(csbPtr >> 56), byte(csbPtr >> 48), byte(csbPtr >> 40), byte(csbPtr >> 32),
-		byte(csbPtr >> 24), byte(csbPtr >> 16), byte(csbPtr >> 8), byte(csbPtr),
-	})
+	crb.ccw = bits.ReverseBytes32(0x001F0002)
+	crb.csbAddr = bits.ReverseBytes64(csbPtr)
 
 	// Setup Source DDE
-	crb.sourceDDE.length = binary.BigEndian.Uint32([]byte{
-		byte(len(src) >> 24), byte(len(src) >> 16), byte(len(src) >> 8), byte(len(src)),
-	})
 	srcPtr := uint64(uintptr(unsafe.Pointer(&src[0])))
-	crb.sourceDDE.address = binary.BigEndian.Uint64([]byte{
-		byte(srcPtr >> 56), byte(srcPtr >> 48), byte(srcPtr >> 40), byte(srcPtr >> 32),
-		byte(srcPtr >> 24), byte(srcPtr >> 16), byte(srcPtr >> 8), byte(srcPtr),
-	})
+	crb.sourceDDE.length = bits.ReverseBytes32(uint32(len(src)))
+	crb.sourceDDE.address = bits.ReverseBytes64(srcPtr)
 
 	// Setup Target DDE
-	crb.targetDDE.length = binary.BigEndian.Uint32([]byte{
-		byte(len(dst) >> 24), byte(len(dst) >> 16), byte(len(dst) >> 8), byte(len(dst)),
-	})
 	dstPtr := uint64(uintptr(unsafe.Pointer(&dst[0])))
-	crb.targetDDE.address = binary.BigEndian.Uint64([]byte{
-		byte(dstPtr >> 56), byte(dstPtr >> 48), byte(dstPtr >> 40), byte(dstPtr >> 32),
-		byte(dstPtr >> 24), byte(dstPtr >> 16), byte(dstPtr >> 8), byte(dstPtr),
-	})
+	crb.targetDDE.length = bits.ReverseBytes32(uint32(len(dst)))
+	crb.targetDDE.address = bits.ReverseBytes64(dstPtr)
 
 	// Touch memory pages to avoid DMA page faults
 	nxTouchPages(src, false)
@@ -245,9 +232,7 @@ func nxCompress(src, dst []byte) (int, error) {
 		return 0, errNXNotAccepted
 	}
 
-	prod := binary.BigEndian.Uint32([]byte{
-		byte(csb.count >> 24), byte(csb.count >> 16), byte(csb.count >> 8), byte(csb.count),
-	})
+	prod := bits.ReverseBytes32(csb.count)
 	return int(prod), nil
 }
 
