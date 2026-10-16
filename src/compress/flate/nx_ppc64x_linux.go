@@ -235,10 +235,9 @@ func nxCompress(src, dst []byte) (int, error) {
 		return 0, errNXNotAccepted
 	}
 
-	// Poll CSB completion with short timeout
-	deadline := time.Now().Add(50 * time.Millisecond)
-	for csb.flags&0x80 == 0 {
-		if time.Now().After(deadline) {
+	// Poll CSB completion flag (bit 0 of flags byte indicates hardware completion)
+	for i := 0; csb.flags&0x80 == 0; i++ {
+		if i > 5000000 {
 			return 0, errNXNotAccepted
 		}
 	}
