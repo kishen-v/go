@@ -9,6 +9,7 @@ package flate
 import (
 	"encoding/binary"
 	"errors"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -30,7 +31,10 @@ const (
 	nxAlignSize = 256
 )
 
-var errNXNotAccepted = errors.New("nx: paste rejected by hardware")
+var (
+	errNXNotAccepted = errors.New("nx: paste rejected by hardware")
+	nxMu             sync.Mutex
+)
 
 // vasTxWinOpenAttr represents the Linux kernel struct vas_tx_win_open_attr (64 bytes).
 type vasTxWinOpenAttr struct {
@@ -52,20 +56,20 @@ type nxDDE struct {
 
 // nxCSB represents the Coprocessor Status Block (128 bytes, 128-byte aligned).
 type nxCSB struct {
-	flags       uint8
-	cs          uint8
-	cc          uint8 // Completion code: 0 = success
-	ce          uint8
-	count       uint32
-	address     uint64
-	res         [112]byte
+	flags   uint8
+	cs      uint8
+	cc      uint8 // Completion code: 0 = success
+	ce      uint8
+	count   uint32
+	address uint64
+	res     [112]byte
 }
 
 // nxCRB represents the Coprocessor Request Block (128 bytes, 256-byte aligned).
 type nxCRB struct {
-	ccw      uint32
-	flags    uint32
-	csbAddr  uint64
+	ccw     uint32
+	flags   uint32
+	csbAddr uint64
 
 	sourceDDE nxDDE
 	targetDDE nxDDE
@@ -92,6 +96,11 @@ var (
 
 // nxInit initializes the VAS NX-GZIP hardware window if available on POWER10.
 func nxInit() {
+	// Disable during toolchain bootstrap or when explicitly disabled via environment
+	if os.Getenv("NX_DISABLE") == "1" {
+		return
+	}
+
 	fd, err := syscall.Open(nxDevicePath, syscall.O_RDWR|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return
@@ -175,6 +184,9 @@ func nxCompress(src, dst []byte) (int, error) {
 		return 0, errNXNotAccepted
 	}
 
+	nxMu.Lock()
+	defer nxMu.Unlock()
+
 	crbBuf := allocAligned(int(unsafe.Sizeof(nxCRB{})), nxAlignSize)
 	crb := (*nxCRB)(unsafe.Pointer(&crbBuf[0]))
 	*crb = nxCRB{}
@@ -218,7 +230,6 @@ func nxCompress(src, dst []byte) (int, error) {
 
 	// In Power ISA, CR0 is the upper 4 bits. CR0.EQ indicates paste acceptance.
 	if (ret>>28)&0x2 == 0 {
-		// Hardware queue rejected or busy: immediately return to trigger software fallback
 		return 0, errNXNotAccepted
 	}
 
