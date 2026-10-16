@@ -6,6 +6,12 @@
 
 package flate
 
+const nxMinPayloadSize = 32 * 1024
+
 func isNXAvailable() bool {
 	return false
+}
+
+func (w *Writer) writeNX(data []byte) (int, error) {
+	return w.d.write(data)
 }

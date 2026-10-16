@@ -862,6 +862,9 @@ type Writer struct {
 // Write writes data to w, which will eventually write the
 // compressed form of data to its underlying writer.
 func (w *Writer) Write(data []byte) (n int, err error) {
+	if isNXAvailable() && len(data) >= nxMinPayloadSize && len(w.dict) == 0 {
+		return w.writeNX(data)
+	}
 	return w.d.write(data)
 }
 
