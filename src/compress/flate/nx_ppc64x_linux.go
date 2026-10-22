@@ -96,6 +96,7 @@ const (
 )
 
 var (
+	errNXUnavailable = errors.New("nx: hardware acceleration is unavailable or disabled")
 	errNXNotAccepted = errors.New("nx: paste rejected by hardware")
 	errNXEmpty       = errors.New("nx: empty source or destination buffer")
 	errNXTooLarge    = errors.New("nx: source exceeds the hardware job size limit")
@@ -319,6 +320,11 @@ func NXCompress(src, dst []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// The engine marks its block BFINAL. Clear it, as set_bfinal(s, false, 0)
+	// does in libnxz, since the terminating stored block appended below is the
+	// final one; otherwise a decoder stops before the terminator and leaves
+	// its bytes unread.
+	dst[0] &^= 1
 	return nxAppendFinalBlock(dst, n, tebc)
 }
 
@@ -488,7 +494,7 @@ func nxCompress(src, dst []byte) (int, uint, error) {
 		return 0, 0, errNXEmpty
 	}
 	if !isNXAvailable() {
-		return 0, 0, errNXNotAccepted
+		return 0, 0, errNXUnavailable
 	}
 	if len(src) > globalNX.jobLimit || uint64(len(src)) > math.MaxUint32 {
 		return 0, 0, errNXTooLarge
@@ -500,7 +506,7 @@ func nxCompress(src, dst []byte) (int, uint, error) {
 	nxMu.Lock()
 	defer nxMu.Unlock()
 	if !globalNX.available {
-		return 0, 0, errNXNotAccepted
+		return 0, 0, errNXUnavailable
 	}
 
 	// The coprocessor holds raw addresses of src and dst: make sure they are

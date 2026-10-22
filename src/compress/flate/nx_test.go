@@ -6,6 +6,7 @@ package flate
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"math/rand"
 	"testing"
@@ -47,14 +48,32 @@ func TestNXCompressRoundTrip(t *testing.T) {
 				t.Logf("size=%d %s: NXCompress: %v", size, name, err)
 				continue
 			}
-			got, err := io.ReadAll(NewReader(bytes.NewReader(dst[:n])))
+			// Append a sentinel: the decoder must consume exactly the
+			// stream, so the output can be framed (e.g. by a gzip trailer).
+			const sentinel = "\xaa\xbb\xcc\xdd"
+			br := bytes.NewReader(append(append([]byte(nil), dst[:n]...), sentinel...))
+			got, err := io.ReadAll(NewReader(br))
 			if err != nil {
 				t.Fatalf("size=%d %s: decompress: %v", size, name, err)
 			}
 			if !bytes.Equal(got, src) {
 				t.Fatalf("size=%d %s: round trip mismatch", size, name)
 			}
+			if br.Len() != len(sentinel) {
+				t.Fatalf("size=%d %s: decoder left %d trailing bytes, want %d (stream not terminated by its final block)",
+					size, name, br.Len(), len(sentinel))
+			}
 		}
+	}
+}
+
+func TestNXCompressUnavailableError(t *testing.T) {
+	if IsNXAvailable() {
+		t.Skip("NX hardware acceleration is available")
+	}
+	_, err := NXCompress(make([]byte, 64), make([]byte, 256))
+	if !errors.Is(err, errNXUnavailable) {
+		t.Fatalf("NXCompress with NX unavailable: got %v, want errNXUnavailable", err)
 	}
 }
 
